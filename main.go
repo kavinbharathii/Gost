@@ -10,7 +10,11 @@ import (
 )
 
 func main() {
-	s := store.New()
+	s, err := store.New("gost.wal")
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	srv := server.New(s)
 
 	fmt.Println("Gost listening on port :6379")

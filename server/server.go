@@ -67,7 +67,11 @@ func (s *Server) handleConn (conn net.Conn) {
 			conn.Write([]byte("+OK\n"))
 
 		case "DEL":
-			ok := s.store.Delete(cmd.Key)
+			ok, err := s.store.Delete(cmd.Key)
+			if err != nil {
+				conn.Write([]byte("-ERR " + err.Error() + "\n"))
+				continue
+			}
 			if !ok {
 				conn.Write([]byte("$-1\n"))
 			} else {
