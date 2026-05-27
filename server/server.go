@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"fmt"
 	"net"
+	"time"
 
 	"github.com/kavinbharathii/gost/protocol"
 	"github.com/kavinbharathii/gost/store"
@@ -63,7 +64,15 @@ func (s *Server) handleConn (conn net.Conn) {
 			}
 
 		case "SET":
-			s.store.Set(cmd.Key, cmd.Val)
+			ttl := time.Duration(0)
+			if cmd.TTL > 0 {
+				ttl = time.Duration(cmd.TTL) * time.Second
+			}
+
+			if err := s.store.Set(cmd.Key, cmd.Val, ttl); err != nil {
+				conn.Write([]byte("-ERR " + err.Error() + "\n"))
+				continue
+			}
 			conn.Write([]byte("+OK\n"))
 
 		case "DEL":

@@ -4,12 +4,14 @@ package protocol
 import (
 	"errors"
 	"strings"
+	"strconv"
 )
 
 type Command struct {
 	Op	string
 	Key	string
 	Val	string
+	TTL int
 }
 
 func Parse (line string) (Command, error) {
@@ -32,7 +34,17 @@ func Parse (line string) (Command, error) {
 		if len(parts) < 3 {
 			return Command{}, errors.New("SET requires a key and value")
 		}
-		return Command{Op: op, Key: parts[1], Val: parts[2]}, nil
+
+		cmd := Command{Op: op, Key: parts[1], Val: parts[2]}
+		if len(parts) == 5 && strings.ToUpper(parts[3]) == "EX"{
+			ttl, err := strconv.Atoi(parts[4])
+			if err != nil {
+				return Command{}, errors.New("EX value must be an integer")
+			}
+			cmd.TTL = ttl
+		}
+
+		return cmd, nil
 	
 	case "DEL":
 		if len(parts) < 2 {

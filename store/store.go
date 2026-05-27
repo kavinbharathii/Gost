@@ -7,11 +7,14 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
+	"strconv"
 )
 
 type Store struct {
 	mu		sync.RWMutex
 	data	map[string]string
+	expiry	map[string]time.Time
 	walFile	*os.File
 }
 
@@ -24,6 +27,7 @@ func New(walPath string) (*Store, error) {
 
 	s := &Store {
 		data: 		make(map[string]string),
+		expiry:		make(map[string]time.Time),
 		walFile: 	f,
 	}
 
@@ -48,11 +52,27 @@ func (s *Store) replay() error {
 		switch parts[0] {
 		case "SET":
 			if len(parts) >= 3 {
-				s.data[parts[1]] = parts[2]
+				key := parts[1]
+				val := parts[2]
+				s.data[key] = val
+
+				if len(parts) == 5 && parts[3] == "EX" {
+					expiryUnix, err := strconv.ParseInt(parts[4], 10, 64)
+					if err == nil {
+						expiry := time.Unix(expiryUnix, 0)
+						if time.Now().Before(expiry) {
+							s.expiry[key] = expiry
+						} else {
+							// key already expired while server was down, skip it
+							delete(s.data, key)
+						}
+					}
+				}
 			}
 		case "DEL":
 			if len(parts) >= 2 {
 				delete(s.data, parts[1])
+				delete(s.expiry, parts[1])
 			}
 		}
 	}
@@ -60,6 +80,26 @@ func (s *Store) replay() error {
 	return scanner.Err()
 }
 
+func (s *Store) StartSweeper (interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			s.mu.Lock()
+			now := time.Now()
+
+			for key, exp := range s.expiry {
+				if now.After(exp) {
+					delete(s.data, key)
+					delete(s.expiry, key)
+				}
+			}
+
+			s.mu.Unlock()
+		}
+	}()
+}
 
 func (s *Store) log (entry string) error {
 	_, err := fmt.Fprintln(s.walFile, entry)
@@ -67,22 +107,44 @@ func (s *Store) log (entry string) error {
 }
 
 func (s *Store) Get (key string) (string, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	exp, hasExpiry := s.expiry[key]
+
+	if hasExpiry && time.Now().After(exp) {
+		delete(s.data, key)
+		delete(s.expiry, key)
+		return "", false
+	}
 
 	val, ok := s.data[key]
 	return val, ok
 }
 
-func (s *Store) Set (key, value string) error {
-	
-	if err := s.log("SET " + key + " " + value); err != nil {
+func (s *Store) Set (key, value string, ttl time.Duration) error {
+	entry := "SET " + key + " " + value
+
+	if ttl > 0 {
+		expiryUnix := time.Now().Add(ttl).Unix()
+		entry += fmt.Sprintf(" EX %d", expiryUnix) 
+	}
+
+	if err := s.log(entry); err != nil {
 		return err
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.data[key] = value
+
+	if ttl > 0 {
+		s.expiry[key] = time.Now().Add(ttl)
+	} else {
+		// case when the key had a ttl before
+		// but since we passed 0, that entry has to be removed
+		delete(s.expiry, key)
+	}
 	return nil
 }
 
@@ -99,6 +161,7 @@ func (s *Store) Delete (key string) (bool, error) {
 
 	if ok {
 		delete(s.data, key)
+		delete(s.expiry, key)
 	}
 	return ok, nil
 }
