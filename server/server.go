@@ -14,14 +14,15 @@ import (
 type Server struct {
 	store		*store.Store
 	listener	net.Listener
+	mode		string
 }
 
-func New(s *store.Store) *Server {
-	return &Server{store: s}
+func New(s *store.Store, mode string) *Server {
+	return &Server{store: s, mode: mode}
 }
 
-func (s *Server) Start() error {
-	ln, err := net.Listen("tcp", ":6379")
+func (s *Server) Start(addr string, replPort string, leaderAddr string) error {
+	ln, err := net.Listen("tcp", addr) 
 
 	if err != nil {
 		return err
@@ -52,6 +53,10 @@ func (s *Server) handleConn (conn net.Conn) {
 			continue
 		}
 
+		if (cmd.Op == "SET" || cmd.Op == "DEL") && s.mode == "follower" {
+			conn.Write([]byte("-ERR this is a follower node, writes not allowed\n"))
+			continue
+		}
 
 		switch cmd.Op {
 		case "GET":

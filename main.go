@@ -2,6 +2,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"time"
@@ -11,16 +12,27 @@ import (
 )
 
 func main() {
+	mode := flag.String("mode", "leader", "leader or follower")
+	port := flag.String("port", "6379", "port to listen on")
+	leaderAddr := flag.String("leader", "", "leader address (follower mode only")
+	replPort := flag.String("repl-port", "6380", "replication port (leader mode only)")
+	flag.Parse()
+
 	s, err := store.New("gost.wal")
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	srv := server.New(s)
 	s.StartSweeper(5 * time.Second)
 
-	fmt.Println("Gost listening on port :6379")
-	if err := srv.Start(); err != nil {
+	srv := server.New(s, *mode)
+
+	fmt.Printf("Gost running in %s mode on :%s\n", *mode, *port)
+	if err := srv.Start(":" + *port, ":" + *replPort, *leaderAddr); err != nil {
 		log.Fatal(err)
 	}
 }
+
+
+
+
