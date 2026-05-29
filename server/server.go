@@ -17,22 +17,23 @@ type Server struct {
 	listener	net.Listener
 	mode		string
 	leader		*replication.Leader
+	walPath		string
 }
 
-func New(s *store.Store, mode string) *Server {
-	return &Server{store: s, mode: mode}
+func New(s *store.Store, mode string, walPath string) *Server {
+	return &Server{store: s, mode: mode, walPath: walPath}
 }
 
 func (s *Server) Start(addr string, replPort string, leaderAddr string) error {
 	if s.mode == "leader" {
-		s.leader = replication.NewLeader("gost.wal")
+		s.leader = replication.NewLeader(s.walPath)
 		if err := s.leader.Start(replPort); err != nil {
 			return err
 		}
 	}
 
 	if s.mode == "follower" {
-		follower := replication.NewFollower(leaderAddr, "gost.wal", func (op, key, value string, ttl int){
+		follower := replication.NewFollower(leaderAddr, s.walPath, func (op, key, value string, ttl int){
 			if op == "SET" {
 				s.store.Set(key, value, time.Duration(ttl) * time.Second)
 			} else if op == "DEL" {
