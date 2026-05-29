@@ -126,6 +126,16 @@ func (s *Server) handleConn (conn net.Conn) {
 			} else {
 				conn.Write([]byte("+OK\n"))
 			}
+		case "COMPACT":
+			if s.mode == "follower" {
+				conn.Write([]byte("-ERR compact not allowed on follower\n"))
+				continue
+			}
+		    if err := s.store.Compact(s.walPath); err != nil {
+        		conn.Write([]byte("-ERR " + err.Error() + "\n"))
+        		continue
+			}
+    		conn.Write([]byte("+OK\n"))
 		}
 	}
 }

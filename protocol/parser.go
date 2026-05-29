@@ -52,6 +52,8 @@ func Parse (line string) (Command, error) {
 		}
 		return Command{Op: op, Key: parts[1]}, nil
 	
+	case "COMPACT":
+		return Command{Op: op}, nil
 	default:
 		return Command{}, errors.New("unknown command: " + op)
 	}
