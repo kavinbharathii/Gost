@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kavinbharathii/gost/protocol"
+	"github.com/kavinbharathii/gost/replication"
 	"github.com/kavinbharathii/gost/store"
 )
 
@@ -15,6 +16,7 @@ type Server struct {
 	store		*store.Store
 	listener	net.Listener
 	mode		string
+	leader		*replication.Leader
 }
 
 func New(s *store.Store, mode string) *Server {
@@ -22,8 +24,30 @@ func New(s *store.Store, mode string) *Server {
 }
 
 func (s *Server) Start(addr string, replPort string, leaderAddr string) error {
-	ln, err := net.Listen("tcp", addr) 
+	if s.mode == "leader" {
+		s.leader = replication.NewLeader("gost.wal")
+		if err := s.leader.Start(replPort); err != nil {
+			return err
+		}
+	}
 
+	if s.mode == "follower" {
+		follower := replication.NewFollower(leaderAddr, "gost.wal", func (op, key, value string, ttl int){
+			if op == "SET" {
+				s.store.Set(key, value, time.Duration(ttl) * time.Second)
+			} else if op == "DEL" {
+				s.store.Delete(key)
+			}
+		})
+
+		go func() {
+			if err := follower.Start(); err != nil {
+				fmt.Println("replication error:", err)
+			}
+		}()
+	}
+
+	ln, err := net.Listen("tcp", addr) 
 	if err != nil {
 		return err
 	}
@@ -78,6 +102,13 @@ func (s *Server) handleConn (conn net.Conn) {
 				conn.Write([]byte("-ERR " + err.Error() + "\n"))
 				continue
 			}
+			if s.leader != nil {
+				entry := "SET " + cmd.Key + " " + cmd.Val
+				if cmd.TTL > 0 {
+					entry += fmt.Sprintf(" EX %d", cmd.TTL)
+				}
+				s.leader.Publish(entry)
+			}
 			conn.Write([]byte("+OK\n"))
 
 		case "DEL":
@@ -85,6 +116,9 @@ func (s *Server) handleConn (conn net.Conn) {
 			if err != nil {
 				conn.Write([]byte("-ERR " + err.Error() + "\n"))
 				continue
+			}
+			if s.leader != nil {
+				s.leader.Publish("DEL " + cmd.Key)
 			}
 			if !ok {
 				conn.Write([]byte("$-1\n"))
